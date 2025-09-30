@@ -28,121 +28,110 @@ echo 1000 > pki/serial
 echo 1000 > pki/crlnumber
 ```
 
-Fichier d’attributs optionnel (je l’ai laissé vide pour ne pas me bloquer sur des doublons CN) : `pki/index.txt.attr`.
+Fichier d’attributs optionnel (je l’ai laissé vide pour ne pas me bloquer sur des doublons CN) : `pki/index.txt.attr`
 
 ---
 
-## 2. Configuration OpenSSL
+## Génération d’un certificat serveur
 
-### 2.2 Modèle fourni (annexe adapté en `openssl.cnf` pour `demoCA/`)
+### Générer une clé privée et une CSR (Certificate Signing Request)
 
-Version plus « académique » issue du modèle. Je l’ai gardée telle quelle sauf adaptation des domaines.
-
-```ini
-[ ca ]
-default_ca = CA_default
-
-[ CA_default ]
-dir               = ./demoCA
-certs             = $dir/certs
-crl_dir           = $dir/crl
-new_certs_dir     = $dir/newcerts
-database          = $dir/index.txt
-serial            = $dir/serial
-crlnumber         = $dir/crlnumber
-certificate       = $dir/cacert.pem
-private_key       = $dir/private/cakey.pem
-default_md        = sha256
-default_days      = 365
-default_crl_days  = 30
-x509_extensions   = usr_cert
-policy            = policy_strict
-
-[ policy_strict ]
-countryName             = match
-stateOrProvinceName     = match
-organizationName        = match
-organizationalUnitName  = optional
-commonName              = supplied
-emailAddress            = optional
-
-[ req ]
-default_bits        = 2048
-prompt              = no
-default_md          = sha256
-distinguished_name  = req_distinguished_name
-x509_extensions     = v3_ca
-
-[ req_distinguished_name ]
-C  = FR
-ST = IDF
-L  = Paris
-O  = ACME Corp
-CN = ACME Corp Root CA
-
-[ v3_ca ]
-basicConstraints       = critical, CA:true, pathlen:0
-keyUsage               = critical, keyCertSign, cRLSign
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer
-
-[ usr_cert ]
-basicConstraints       = CA:false
-keyUsage               = critical, DigitalSignature, KeyEncipherment
-extendedKeyUsage       = serverAuth
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-subjectAltName         = @alt_names
-
-[ crl_ext ]
-authorityKeyIdentifier = keyid:always
-
-[ ocsp ]
-basicConstraints       = CA:false
-keyUsage               = critical, DigitalSignature
-extendedKeyUsage       = OCSPSigning
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-
-[ alt_names ]
-DNS.1 = app.lab.securecorp.internal
-DNS.2 = www.app.lab.securecorp.internal
-IP.1  = 127.0.0.1
+```
+$ openssl genrsa -out serverkey.pem 2048
+$ openssl req -new -key serverkey.pem -out server.csr
 ```
 
-### 2.3 Différences et choix
+je creer la clef prive du serveur puis un CRS
 
-| Élément        | Version minimale (pki/)  | Modèle fourni (demoCA/) | Motif / commentaire                                      |
-| -------------- | ------------------------ | ----------------------- | -------------------------------------------------------- |
-| Répertoire     | ./pki                    | ./demoCA                | Convention personnelle vs modèle sujet                   |
-| Fichiers CA    | ca.cert.pem / ca.key.pem | cacert.pem / cakey.pem  | Nommage plus explicite côté perso                        |
-| Durée root     | 3650 (argument)          | 365 (config)            | J’ai forcé longue durée pour illustrer pratique courante |
-| Profil serveur | server_cert              | usr_cert                | Deux noms pour même logique d’usage TLS                  |
-| Section ocsp   | Ajoutée plus tard        | Prévue d’entrée         | Approche incrémentale vs complète                        |
-| CRL params     | Ajout manuel             | default_crl_days 30     | Paramètre absent dans version courte                     |
-| Politique DN   | state absente            | state exigée            | Simplification au début                                  |
-| Alt names      | Oui                      | Oui                     | Indispensable (navigateurs)                              |
+### Signer ce certificat avec votre CA en respectant les contraintes définies
 
-En résumé : j’ai d’abord compris chaque brique avec une config épurée, puis vérifié que je pouvais reproduire avec la structure attendue par le sujet.
+```
+openssl ca -config openssl.cnf -in server.csr -out servercert.pem -batch
+Using configuration from openssl.cnf
+Check that the request matches the signature
+Signature ok
+The Subject's Distinguished Name is as follows
+countryName           :PRINTABLE:'FR'
+stateOrProvinceName   :ASN.1 12:'Some-State'
+localityName          :ASN.1 12:'Paris'
+organizationName      :ASN.1 12:'Internet Widgits Pty Ltd'
+commonName            :ASN.1 12:'server.example.com'
+Certificate is to be certified until Sep 30 16:12:40 2026 GMT (365 days)
 
-### 2.4 Extensions de distribution (CDP / AIA)
+Write out database with 1 new entries
+Database updated
 
-Non incluses dans la version minimale pour rester focalisé sur les bases. En production :
-
-- crlDistributionPoints : URL(s) de récupération automatique de la CRL.
-- authorityInfoAccess : point(s) OCSP (statut ciblé) et parfois CA issuers.
-
-Sans ces extensions les clients peuvent ne pas vérifier la révocation.
-
-Exemple d’ajout (optionnel) :
-
-```ini
-[ usr_cert ]
-crlDistributionPoints = URI:http://pki.lab.securecorp.internal/crl/ca.crl.pem
-authorityInfoAccess   = OCSP;URI:http://ocsp.lab.securecorp.internal
 ```
 
-Je les intégrerais après validation fonctionnelle locale.
+Je signe mon CRS avec la CA
+
+### Vérifier que les champs keyUsage et extendedKeyUsage sont bien renseignés
+
+```bash
+openssl x509 -in servercert.pem -text -noout
+Certificate:
+  Data:
+    Version: 3 (0x2)
+  Serial Number: 4881 (0x1311)
+    Signature Algorithm: sha256WithRSAEncryption
+    Issuer: C = FR, ST = Some-State, O = Internet Widgits Pty Ltd
+    Validity
+  Not Before: Sep 30 16:12:40 2025 GMT
+  Not After : Sep 30 16:12:40 2026 GMT
+    Subject: C = FR, ST = Some-State, O = Internet Widgits Pty Ltd, CN = server.example.com
+    Subject Public Key Info:
+      Public Key Algorithm: rsaEncryption
+        Public-Key: (2048 bit)
+        Modulus:
+          00:b1:e0:b7:6c:08:c2:fe:6a:21:bd:06:72:61:43:
+          51:b5:f6:42:e1:ae:d8:38:55:be:69:9a:fb:4c:4d:
+          68:9c:f7:55:2d:3b:fd:a3:91:9e:93:81:bb:9f:b8:
+          a8:60:22:bc:a3:ea:3a:33:30:6d:47:6e:d4:c4:07:
+          2b:b5:3a:e5:bf:e8:2a:4b:ea:39:4a:02:41:f8:5f:
+          9b:11:67:4d:ce:c3:32:9b:63:9f:0d:58:21:83:67:
+          93:75:4c:8c:0a:0c:f3:6b:82:a2:0d:85:b3:45:b4:
+          bf:2d:68:13:a2:1f:07:fa:f1:6a:bc:33:97:8b:9e:
+          d4:f8:e6:d7:09:79:1d:a9:4b:6d:bd:49:4b:3b:c1:
+          0a:06:1d:07:e6:95:d1:f2:59:91:41:a1:09:48:45:
+          ec:50:a5:c5:02:1e:bc:9a:80:06:53:67:e8:8d:42:
+          bc:22:5c:a4:73:d2:a6:ae:cc:95:8e:86:c5:41:72:
+          35:a6:9e:f4:37:0d:c4:4e:46:14:6c:4f:8c:35:c1:
+          bd:d3:0d:bd:ef:b9:21:fe:d4:ed:8b:0b:c8:db:7a:
+          30:76:e7:37:3e:eb:59:ed:a1:83:63:49:35:e2:a8:
+          66:d9:0a:2d:08:26:b1:23:bc:58:51:c9:f3:5f:c5:
+          ff:f2:16:6d:a2:a0:50:19:5a:36:ca:38:59:e4:93:
+          b5:14
+        Exponent: 65537 (0x10001)
+    X509v3 extensions:
+      X509v3 Basic Constraints: critical
+        CA:FALSE
+      X509v3 Key Usage: critical
+        Digital Signature, Key Encipherment
+      X509v3 Subject Key Identifier:
+        B9:56:4E:B3:7B:09:6A:0A:4C:80:87:73:05:51:E6:DE:23:BE:AF:B1
+      X509v3 Authority Key Identifier:
+        DirName:/C=FR/ST=Some-State/O=Internet Widgits Pty Ltd
+        serial:7A:33:B1:65:B4:49:AB:85:71:FF:1A:6F:5C:CF:69:1B:6A:03:9F:F0
+  Signature Algorithm: sha256WithRSAEncryption
+  Signature Value:
+    1a:44:5b:1b:74:be:5d:5d:1e:75:8b:08:52:ca:d1:d0:cc:43:
+    26:6a:ed:71:df:4b:84:b2:a1:7f:8f:d2:d1:d4:84:b9:51:aa:
+    54:62:73:ed:27:d0:09:d4:35:f4:b7:08:63:27:79:9c:a6:7f:
+    e1:41:d6:be:18:a6:85:57:6a:97:59:c4:71:40:8d:a9:17:b5:
+    23:c2:e8:28:8d:09:21:d6:37:f8:85:a4:19:e7:08:68:79:7c:
+    c1:47:4e:28:56:85:e2:72:11:36:a7:ec:80:e0:f8:b0:6b:70:
+    68:75:3d:67:91:d3:37:08:ed:17:26:26:cf:66:38:cb:dc:8d:
+    fd:d4:15:f9:50:d2:5e:26:7a:f3:b3:b8:1a:05:97:b3:63:1d:
+    e2:eb:51:c2:29:2b:d9:fc:ef:61:47:67:18:7a:43:f5:a1:3b:
+    7c:11:2e:e0:2f:3e:1f:1b:fc:23:a7:a3:3a:27:20:90:ca:85:
+    49:67:80:00:46:c4:eb:3f:00:7d:dd:d9:b0:dc:b1:4f:f5:df:
+    14:34:e3:d1:ef:39:22:0b:cc:06:ee:47:be:3d:a7:1d:a5:55:
+    d1:83:29:fc:4a:84:c0:b5:1c:ee:f3:65:94:08:e6:64:a9:c9:
+    e0:2e:8b:d9:99:8b:a6:f7:3c:45:b1:1f:13:15:ea:70:ca:37:
+    0f:0c:52:85
+```
+
+Je vérifie servercert.pem avec openssl x509 -text -noout pour confirmer que keyUsage a digitalSignature, keyEncipherment comme dans [ usr_cert ] de openssl.cnf et voir si extendedKeyUsage est présent.
 
 ---
 
