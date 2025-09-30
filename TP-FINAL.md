@@ -125,6 +125,25 @@ IP.1  = 127.0.0.1
 
 En résumé : j’ai d’abord compris chaque brique avec une config épurée, puis vérifié que je pouvais reproduire avec la structure attendue par le sujet.
 
+### 2.4 Extensions de distribution (CDP / AIA)
+
+Non incluses dans la version minimale pour rester focalisé sur les bases. En production :
+
+- crlDistributionPoints : URL(s) de récupération automatique de la CRL.
+- authorityInfoAccess : point(s) OCSP (statut ciblé) et parfois CA issuers.
+
+Sans ces extensions les clients peuvent ne pas vérifier la révocation.
+
+Exemple d’ajout (optionnel) :
+
+```ini
+[ usr_cert ]
+crlDistributionPoints = URI:http://pki.lab.securecorp.internal/crl/ca.crl.pem
+authorityInfoAccess   = OCSP;URI:http://ocsp.lab.securecorp.internal
+```
+
+Je les intégrerais après validation fonctionnelle locale.
+
 ---
 
 ## 3. Création de la CA racine
@@ -234,6 +253,8 @@ X509v3 Subject Alternative Name:
   DNS:app.lab.securecorp.internal, DNS:www.app.lab.securecorp.internal, IP Address:127.0.0.1
 ```
 
+> Note : pas d’EKU `clientAuth` ajouté ici pour limiter l’usage du certificat. Un besoin d’authentification mutuelle justifierait un certificat dédié.
+
 ---
 
 ## 5. Révocation + CRL
@@ -256,6 +277,12 @@ R 250930100500Z 350927095900Z 1000 unknown /C=FR/O=DemoSecurity/CN=app.lab.secur
 
 ```bash
 openssl ca -config pki/openssl.cnf -revoke pki/server/server.cert.pem
+```
+
+Révocation avec raison explicite :
+
+```bash
+openssl ca -config pki/openssl.cnf -revoke pki/server/server.cert.pem -crl_reason keyCompromise
 ```
 
 Sortie:
@@ -321,6 +348,8 @@ openssl ca -config pki/openssl.cnf \
   -in pki/csr/ocsp.csr.pem \
   -out pki/ocsp/ocsp.cert.pem
 ```
+
+> Note : certains labs signent OCSP avec la clé root. Ici usage d’un certificat OCSP distinct pour réduire l’impact d’un éventuel compromis.
 
 ### 6.2 Lancement du responder (ex: port 2560)
 
@@ -449,6 +478,22 @@ openssl ocsp -CAfile pki/certs/ca.cert.pem \
   -url http://127.0.0.1:2560 -no_nonce -resp_text
 ```
 
+### (Variante) CDP / AIA + raison de révocation
+
+Adaptations possibles si publication réseau :
+
+```ini
+[ usr_cert ]
+crlDistributionPoints = URI:http://pki.lab.securecorp.internal/crl/ca.crl.pem
+authorityInfoAccess   = OCSP;URI:http://ocsp.lab.securecorp.internal
+```
+
+Commande avec raison :
+
+```bash
+openssl ca -config pki/openssl.cnf -revoke pki/server/server.cert.pem -crl_reason keyCompromise
+```
+
 ---
 
 ## 9. Réponses aux questions
@@ -482,26 +527,3 @@ OCSP : `openssl ocsp ...` → statut `revoked` quand applicable.
 ### Q7. Pourquoi le fichier `openssl.cnf` est critique
 
 Centralise chemins, politiques (contrôle DN), profils (limitation d’usage), AIA/CDP pour validation côté client, empêche émission accidentelle d’un cert sur-privilégié.
-
----
-
-## 10. Difficultés rencontrées & bonnes pratiques
-
-| Difficulté                                      | Risque                      | Mitigation                                           |
-| ----------------------------------------------- | --------------------------- | ---------------------------------------------------- |
-| Mauvaise extension (ex: CA:TRUE sur un serveur) | Compromission de confiance  | Profils séparés, revue config                        |
-| Perte clé privée CA                             | Rupture totale de confiance | Sauvegarde chiffrée + HSM                            |
-| CRL non mise à jour                             | Validation périmée          | Automatisation (cron), supervision                   |
-| Temps réel révocation                           | Latence CRL                 | OCSP + stapling                                      |
-| SAN manquant                                    | Erreur navigateur           | Process CSR + contrôle automatique                   |
-| Numéros de série dupliqués                      | Incohérence base            | Fichier `serial` atomique (unique_subject optionnel) |
-| Clés faibles                                    | Compromission               | Politique (4096 root, 2048+ leaf, rotation)          |
-
-## 13. Bilan personnel
-
-Points clés consolidés :
-
-- Compréhension claire du rôle de chaque extension critique (basicConstraints, keyUsage, extendedKeyUsage, SAN).
-- Intérêt d’une approche incrémentale (config minimale puis modèle complet) pour éviter le copier-coller aveugle.
-- Manipuler la base (`index.txt`) et voir passer l’état de V à R aide à mémoriser le cycle de vie d’un certificat.
-- Séparer tôt les répertoires (clé privée / certs / CRL / CSR) réduit les confusions.
