@@ -1,24 +1,8 @@
 # TP OpenSSL
 
-## Contexte & environnement réel du TP
-
-- Réalisé le: 30/09/2025 (session de révision sécurité système)
-- Plateforme: WSL2 Ubuntu 22.04 sur machine perso (Windows 11)
-- Version OpenSSL utilisée: `OpenSSL 3.0.x` (vérifiée avec `openssl version`)
-- Petit imprévu rencontré au début: j’avais oublié d’ajouter le SAN, le navigateur ignorait le CN et affichait une alerte supplémentaire.
-
-J’essaie de garder les commandes minimalistes. Là où j’hésitais (ex: durée exacte du serveur), je me suis aligné sur la limite < 398 jours supportée par les principaux navigateurs.
-
-> Environnement visé : shell Bash Linux ou WSL. OpenSSL récent (>=1.1.1). Noms internes utilisés :
-> `app.lab.securecorp.internal`, `www.app.lab.securecorp.internal`, `pki.lab.securecorp.internal`, `ocsp.lab.securecorp.internal`
->
-> Ajouter si besoin dans /etc/hosts :
->
-> ```text
-> 127.0.0.1 app.lab.securecorp.internal www.app.lab.securecorp.internal pki.lab.securecorp.internal ocsp.lab.securecorp.internal
-> ```
-
 ## 1. Structure initiale & préparation
+
+### 1.1 Arborescence de base de la PKI
 
 ```bash
 mkdir -p pki/{certs,crl,newcerts,private,csr,ocsp,server}
@@ -28,24 +12,95 @@ echo 1000 > pki/serial
 echo 1000 > pki/crlnumber
 ```
 
-Fichier d’attributs optionnel (je l’ai laissé vide pour ne pas me bloquer sur des doublons CN) : `pki/index.txt.attr`
+Fichier d’attributs optionnel (vide) : `pki/index.txt.attr`
 
----
+### 1.2 CA minimale (démonstration rapide)
 
-## Génération d’un certificat serveur
+Objectif : montrer la création « brute » d’une clé privée de CA et d’un certificat auto‑signé simple (RSA 2048 / 365 jours) avant la version plus robuste (RSA 4096 / 10 ans) utilisée ensuite dans la section 2.
 
-### Générer une clé privée et une CSR (Certificate Signing Request)
+#### Clé privée de la CA (simple)
 
+```bash
+$ openssl genrsa -out Pkey.pem 2048
+$ cat Pkey.pem
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDUjQmMahZLNF2K
+d8ld80ZbOu2azjTOegyfVCPZ4rmHEozbVabjT91TRsrEzbA6m5OJrYL49eL0zRvq
+mFUE6DoqdIXlRTlcy2IyjrOZrZK1FPglK04/mOHwb8nyNpoAwIt65nj0HLvWEyZd
+fUT0MVLolvgDhgZk5qPvlfd1p0SXO9ZYQx66074uoTgFFytz3kul3zWX/S2t4xyN
+faZS37kjQkTn1JMBeVQ+gNN9L/Bli8NZx70mzL+1owQSMW5fGPXLq5s+7kHywr+p
+S4h6IR0+N2ZjN4vFLy1055Ja/YPFgYYsHM66I4bLRcB4T0/qOOaJpk0eChttY8tM
+2p70RYTpAgMBAAECggEACTKhOyZMGK0HbzqHyD0CymfeaFiMCHNXoH1vn7oj9Shk
+WAl401VdaoEhvSp5ec/JrqeHh2Z8j8NgdeJpq3CxM60fLjC0rsNOWIm8U+Yi9xsV
+MeaR2EaxYEo2Hvkl6OpsHsFico3bwwPJITqOhVKtF8uQp/ZgyHUCmxeOQdUfLrwf
+9hzpgNk0a6KgTQoDkxdu4LX+BEvzHtDCPzfKWOxAT3CRSQqBYUv1yz8gshsvR7lW
+28ViX+gmLdHbI/iUnf1NhPAfBBxLI/4CJ20ZJ53X0EOOz7EwYgTQZ2Ac9l4410MY
+tN8yR8ICWDpCED9Wk7C19zR6LJICkJAtc56V12c6AQKBgQDpT+lntC/uA69lEfdj
+vN4QDoa1u17rzPeWACH360f73XLFMXhJ6Jb6a3lZGCLi4uiyhTqD30qSIEHjoOfV
+Zx04E6jrQ1AJvTQAFaGB3MKChB38slEMdQEZybi8foXEvJLmcNDQwN/531rWJgjW
+TxPQBembdvEHvXr33gHpXNmocQKBgQDpOEtOhGjYCRcFKz4OBipM6N6SblBRhCKs
+d4KJJl1+1cyLe4ZP+bYFZ7UorlwAnDeYIcyUJyUxvRgagB3a0BeWhU/2Aoptnz96
+1/lowwLxjhrwzLPwwuSPf87CgBtiGv3Ks7kcwlrUkq2v9m++TCJpNSn5aVaJhn/u
+5I15eVsf+QKBgQCk7nnodqd/UZmXEFlbZ3Nv1GUEaX2ToeTQZC2fLfNIKGbu4abQ
+UJ0SUBGLmxVmYNPxB1+zQ5FatXT+rovU/zzXnIZIMeCN0fPFr4Tp4Z6bVzw/m+rR
+rJDnowN2NNbpmgka4FuthvuOj4eOZXrPzT0LTHK1FSMUvq0ENiwRxTKU8QKBgF8L
+7zz3n5bz1Wro3ahvgMvJV/QLezZNiKgLKKrmdNIdJfhuhiWP2kvHoUAMFzi0cb/R
+foOelHz52JnsPr6Pch2JBTZ4gJv+e6t/24iDeW6igH5EnszvUKDe8I+6D+7imy4C
+It4Co2vgv2JoJ9BBTQDdhta7xGXV58ufX7zy5V1ZAoGBAKfTUr7WK6FzULqHNigd
+iXx/jEXX2AxRSshuAvDoQ+Wc1iBgsuMDJLvBdZtXCYpv1MsZLLsec48hOcgzW0Yk
+A9tS8vSdQ3CNTWU6jBvxovfVZDKw+SQCOQByX6rd0AhmR6vFIoff70UvOvLfGjN+
+tnYQTO+PmN19Ddp88sukKVFs
+-----END PRIVATE KEY-----
 ```
+
+Je fais une clé privée `Pkey.pem` de 2048 bits (non protégée par mot de passe ici – amélioration plus loin : chiffrement + permissions renforcées).
+
+#### Certificat auto‑signé initial
+
+```bash
+$ openssl req -new -key Pkey.pem -out cert.csr
+$ openssl x509 -req -days 365 -in cert.csr -signkey Pkey.pem -out certssigh.crt
+$ openssl x509 -in certssigh.crt -text -noout
+```
+
+Extrait (abrégé) : Version 1 (v1), pas d’extensions (normal), validité 365 jours. Utile uniquement pour un test local, insuffisant pour une PKI structurée (pas de BasicConstraints / KeyUsage).
+
+#### Mise en place arborescence minimale (style ancien script)
+
+```bash
+$ mkdir fichierCA
+$ cd fichierCA/
+$ mkdir certs | mkdir crl | mkdir newcerts | mkdir private
+$ touch index.txt
+$ echo 1234 > serial
+$ echo 1234 > crlnumber
+$ ls
+certs  crl  crlnumber  index.txt  newcerts  private  serial
+$ mv ../Pkey.pem private/cakey.pem
+$ mv ../certssigh.crt cacert.pem
+$ cd .. && mv fichierCA demoCA
+$ ls demoCA
+cacert.pem  certs  crl  crlnumber  index.txt  newcerts  private  serial
+```
+
+Limites de cette approche : pas de profil d’extensions, clé CA courte (2048), absence de chiffrement de la clé, validité courte, pas de séparation nette des rôles.
+
+### 1.3 Génération rapide d’un certificat serveur (exemple express)
+
+Objectif : montrer le flux minimal (clé + CSR + signature + inspection) avant la version plus propre avec SAN (future section 3 « Certificat serveur »).
+
+#### Clé privée et CSR
+
+```bash
 $ openssl genrsa -out serverkey.pem 2048
 $ openssl req -new -key serverkey.pem -out server.csr
 ```
 
 je creer la clef prive du serveur puis un CRS
 
-### Signer ce certificat avec votre CA en respectant les contraintes définies
+#### Signature par la CA
 
-```
+```bash
 openssl ca -config openssl.cnf -in server.csr -out servercert.pem -batch
 Using configuration from openssl.cnf
 Check that the request matches the signature
@@ -60,12 +115,9 @@ Certificate is to be certified until Sep 30 16:12:40 2026 GMT (365 days)
 
 Write out database with 1 new entries
 Database updated
-
 ```
 
-Je signe mon CRS avec la CA
-
-### Vérifier que les champs keyUsage et extendedKeyUsage sont bien renseignés
+#### Vérification des usages (dump brut)
 
 ```bash
 openssl x509 -in servercert.pem -text -noout
@@ -131,20 +183,113 @@ Certificate:
     0f:0c:52:85
 ```
 
-Je vérifie servercert.pem avec openssl x509 -text -noout pour confirmer que keyUsage a digitalSignature, keyEncipherment comme dans [ usr_cert ] de openssl.cnf et voir si extendedKeyUsage est présent.
+Commentaires rapides : absence de SAN → usage navigateur limité (on l’ajoutera dans la section dédiée).
 
 ---
 
-## 3. Création de la CA racine
+## 2. Création de la CA racine
 
-### 3.1 Clé privée CA
+### 2.1 Objectif
+
+Mettre en place une CA durable (clé 4096 bits protégée) avec un fichier `pki/openssl.cnf` enrichi contenant des profils d’extensions. Cette partie corrige les limites observées dans les sous‑sections 1.2 (CA minimale) et 1.3 (cert serveur sans SAN) et prépare l’émission contrôlée (Section 3).
+
+### 2.2 Profils essentiels dans `pki/openssl.cnf`
+
+Extraits minimaux (à ajouter si absents) :
+
+```ini
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir               = ./pki
+certs             = $dir/certs
+crl_dir           = $dir/crl
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+crlnumber         = $dir/crlnumber
+private_key       = $dir/private/ca.key.pem
+certificate       = $dir/certs/ca.cert.pem
+default_md        = sha256
+default_days      = 365
+default_crl_days  = 30
+policy            = policy_strict
+email_in_dn       = no
+unique_subject    = no
+
+[ policy_strict ]
+C  = match
+O  = match
+CN = supplied
+
+[ v3_ca ]
+basicConstraints       = critical, CA:true, pathlen:0
+keyUsage               = critical, keyCertSign, cRLSign
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+
+[ usr_cert ]
+basicConstraints       = critical, CA:false
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+
+[ server_cert ]
+# Variante explicite (séparation d’usage potentielle)
+basicConstraints       = critical, CA:false
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+subjectAltName         = @alt_names
+
+[ ocsp ]
+basicConstraints       = critical, CA:false
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = OCSPSigning
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+
+[ crl_ext ]
+authorityKeyIdentifier = keyid
+
+# Bloc SAN d'exemple (souvent fourni via un fichier CSR séparé)
+[ alt_names ]
+DNS.1 = app.lab.securecorp.internal
+DNS.2 = www.app.lab.securecorp.internal
+IP.1  = 127.0.0.1
+```
+
+Justification rapide :
+
+- v3_ca : fixe l'autorité (CA:true) + pathlen:0 pour éviter des intermédiaires non prévus.
+- usr_cert : profil générique pour petits services internes (serverAuth suffisant).
+- server_cert : duplication contrôlée si besoin de spécialiser (ex : ajouter plus tard d'autres usages ou contraintes SAN).
+- ocsp : usage unique OCSPSigning (principe du moindre privilège) + keyUsage digitalSignature.
+- SAN : séparé pour ne pas modifier le fichier principal à chaque nouveau nom.
+- crl_ext : permet d’insérer l’identifiant d’autorité dans la CRL.
+
+Durées : 365 jours pour les certificats finaux (démonstration). La CA (voir commande 2.4) aura 3650 jours. CRL = 30 jours (valeur pédagogique – en production on réduit parfois à 7 jours voire 1 jour selon exigences de revocation freshness).
+
+### 2.3 Limites des exemples rapides précédents
+
+- Certificat CA v1 (sous‑section 1.2) : aucune extension → peu robuste.
+- Clé CA 2048 bits non chiffrée : risque si vol de fichier.
+- Cert serveur initial (1.3) sans SAN : rejet navigateur (CN ignoré).
+- EKU absent initialement : certains clients tolèrent mais ce n’est plus une bonne pratique.
+
+Ces limites sont levées avec la clé 4096 bits chiffrée + profils v3_ca / server_cert.
+
+### 2.4 Clé privée CA
 
 ```bash
 openssl genrsa -aes256 -out pki/private/ca.key.pem 4096
 chmod 600 pki/private/ca.key.pem
 ```
 
-### 3.2 Certificat auto-signé (root)
+### 2.5 Certificat auto-signé (root)
 
 ```bash
 openssl req -config pki/openssl.cnf \
@@ -154,7 +299,7 @@ openssl req -config pki/openssl.cnf \
 chmod 644 pki/certs/ca.cert.pem
 ```
 
-### 3.3 Vérification rapide
+### 2.6 Vérification rapide
 
 ```bash
 openssl x509 -noout -text -in pki/certs/ca.cert.pem | head -n 30
@@ -173,7 +318,7 @@ X509v3 Key Usage: critical
 
 ---
 
-## 4. Certificat serveur
+## 3. Certificat serveur
 
 ### 4.1 Génération clé privée serveur
 
@@ -246,7 +391,7 @@ X509v3 Subject Alternative Name:
 
 ---
 
-## 5. Révocation + CRL
+## 4. Révocation + CRL
 
 Avant de révoquer, j’ai regardé le contenu de `pki/index.txt` pour voir le format :
 
@@ -312,7 +457,7 @@ Revoked Certificates:
 
 ---
 
-## 6. Service OCSP local
+## 5. Service OCSP local
 
 > Note perso: première fois que je lance un responder OCSP « à la main ». Ce qui m’a surpris : la commande reste très verbeuse si on ne limite pas (`-nrequest`). Sans ça, j’ai oublié une fois de la stopper et j’avais un port encore occupé.
 
@@ -385,7 +530,7 @@ server.cert.pem: revoked
 
 ---
 
-## 7. Petit serveur HTTPS de test
+## 6. Petit serveur HTTPS de test
 
 ### 7.1 Si le premier cert est révoqué
 
@@ -426,7 +571,7 @@ Extrait de sortie :
 
 ---
 
-## 8. Vérifications rapides
+## 7. Vérifications rapides
 
 ### 8.1 Chaîne de certificats
 
@@ -485,7 +630,7 @@ openssl ca -config pki/openssl.cnf -revoke pki/server/server.cert.pem -crl_reaso
 
 ---
 
-## 9. Réponses aux questions
+## 8. Réponses aux questions
 
 ### Q1. Pourquoi le navigateur affiche une alerte ?
 
